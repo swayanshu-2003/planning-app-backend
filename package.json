@@ -6,7 +6,7 @@
   "scripts": {
     "start": "ts-node src/index.ts",
     "dev": "nodemon --exec ts-node src/index.ts",
-    "build": "npx prisma generate && tsc"
+    "vercel-build": "prisma generate && prisma migrate deploy && tsc"
   },
   "keywords": [],
   "author": "",
