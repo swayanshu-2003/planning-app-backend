@@ -8,8 +8,9 @@ export const createToken = (user: any) => {
     return token
 }
 
-export const verifyToken = async (req: Request, res: Response, next: NextFunction) => {
+export const verifyToken = async (req: any, res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
+    console.log(authHeader)
     if (!authHeader) {
         return res.status(401).json({
             success: false,
@@ -17,10 +18,11 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
         })
     }
     const token = authHeader.split(" ")[1];
+    console.log(token)
     try {
         const decoded: any = await jwt.verify(token, "swayanshu");
         req.user = decoded.user;
-        // console.log(decoded)
+        console.log(req.user)
         next();
     } catch (error) {
         console.error(error);

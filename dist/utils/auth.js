@@ -23,6 +23,7 @@ const createToken = (user) => {
 exports.createToken = createToken;
 const verifyToken = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const authHeader = req.headers.authorization;
+    console.log(authHeader);
     if (!authHeader) {
         return res.status(401).json({
             success: false,
@@ -30,10 +31,11 @@ const verifyToken = (req, res, next) => __awaiter(void 0, void 0, void 0, functi
         });
     }
     const token = authHeader.split(" ")[1];
+    console.log(token);
     try {
         const decoded = yield jsonwebtoken_1.default.verify(token, "swayanshu");
         req.user = decoded.user;
-        // console.log(decoded)
+        console.log(req.user);
         next();
     }
     catch (error) {

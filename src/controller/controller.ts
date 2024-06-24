@@ -17,18 +17,12 @@ const todoSchema = z.object({
     title: z.string().min(1, { message: "Title is required" }),
     description: z.string().optional(),
     done: z.boolean().optional(),
-    userId: z.number().int().min(1)
 });
-const todoUpdateSchema = z.object({
-    title: z.string().min(1, { message: "Title is required" }).optional(),
-    description: z.string().optional(),
-    done: z.boolean().optional(),
-    userId: z.number().int().min(1)
-}).partial();
 
-export const registeruser = async (req: Request, res: Response, next: NextFunction) => {
+
+export const registeruser = async (req: any, res: Response, next: NextFunction) => {
     try {
-        // Validate the request body against the schema
+        // Validate the any body against the schema
         const validateReq = userSchema.safeParse(req.body);
         if (!validateReq.success) {
             return res.status(400).json({
@@ -51,10 +45,12 @@ export const registeruser = async (req: Request, res: Response, next: NextFuncti
                 username: true,
                 firstName: true,
                 lastName: true,
+                uuid: true
             },
         });
-
+        const token = createToken(user);
         return res.status(201).json({
+            token,
             success: true,
             message: "User created successfully",
             user,
@@ -70,7 +66,7 @@ export const registeruser = async (req: Request, res: Response, next: NextFuncti
 
 
 
-export const loginUser = async (req: Request, res: Response) => {
+export const loginUser = async (req: any, res: Response) => {
     try {
         const { username, password } = req.body;
         const user = await prisma.user.findUnique({
@@ -79,7 +75,7 @@ export const loginUser = async (req: Request, res: Response) => {
                 username: true,
                 firstName: true,
                 lastName: true,
-                id: true
+                uuid: true
             },
             where: {
                 username,
@@ -92,7 +88,6 @@ export const loginUser = async (req: Request, res: Response) => {
             });
         }
         const token: string = createToken(user);
-        // console.log(token)
         if (!token) {
             return res.status(500).json({
                 success: false,
@@ -111,6 +106,27 @@ export const loginUser = async (req: Request, res: Response) => {
 }
 
 
+export const getUserData = async (req: any, res: Response) => {
+    try {
+        if (!req.user) {
+            return res.status(404).json({
+                success: false,
+                message: "User Not Found"
+            })
+        }
+        const user = req.user;
+        return res.status(200).json({
+            success: true,
+            user
+        })
+    } catch (error) {
+        console.error(error)
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        })
+    }
+}
 
 
 
@@ -124,7 +140,15 @@ export const loginUser = async (req: Request, res: Response) => {
 
 
 
-export const createTodo = async (req: Request, res: Response) => {
+
+
+
+
+
+
+
+
+export const createTodo = async (req: any, res: Response) => {
     try {
         const validateReq = todoSchema.safeParse(req.body);
         if (!validateReq.success) {
@@ -133,9 +157,8 @@ export const createTodo = async (req: Request, res: Response) => {
                 message: validateReq.error.issues[0].message,
             });
         }
-
-        const { title, description, done, userId } = validateReq.data;
-        console.log(validateReq.data)
+        const ownerId = req.user.uuid;
+        const { title, description, done } = validateReq.data;
 
         const todo = await prisma.todo.create({
 
@@ -143,13 +166,7 @@ export const createTodo = async (req: Request, res: Response) => {
                 title,
                 description,
                 done,
-                userId,
-            },
-            select: {
-                User: true,
-                title: true,
-                description: true,
-                done: true,
+                ownerId,
             },
         })
 
@@ -167,27 +184,123 @@ export const createTodo = async (req: Request, res: Response) => {
     }
 }
 
-export const getTodos = async (req: Request, res: Response) => {
+export const getTodos = async (req: any, res: Response) => {
     try {
-        const todos = await prisma.todo.findMany({
-            select: {
-                id: true,
-                title: true,
-                description: true,
-                done: true,
-            },
-            where: {
-                userId: parseInt(req.user.id, 10),
-                isDeleted: false
-            }
-        })
+        const { type } = req.query;
+        let todos: any = [];
+
+        switch (type) {
+            case 'owned':
+                todos = await prisma.todo.findMany({
+                    where: {
+                        ownerId: req.user.uuid,
+                        isDeleted: false,
+                        done: false,
+                    },
+                    include: {
+                        owner: true,
+                        collaborators: {
+                            include: {
+                                user: {
+                                    select: {
+                                        username: true,
+                                        firstName: true,
+                                        lastName: true,
+                                        uuid: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+                break;
+
+            case 'collab':
+                todos = await prisma.todo.findMany({
+                    where: {
+                        collaborators: {
+                            some: {
+                                userId: req.user.uuid,
+                            },
+                        },
+                        isDeleted: false,
+                    },
+                    include: {
+                        owner: true,
+                        collaborators: {
+                            include: {
+                                user: {
+                                    select: {
+                                        username: true,
+                                        firstName: true,
+                                        lastName: true,
+                                        uuid: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+                break;
+
+            case 'deleted':
+                todos = await prisma.todo.findMany({
+                    where: {
+                        ownerId: req.user.uuid,
+                        isDeleted: true,
+                    },
+                    include: {
+                        owner: true,
+                        collaborators: {
+                            include: {
+                                user: {
+                                    select: {
+                                        username: true,
+                                        firstName: true,
+                                        lastName: true,
+                                        uuid: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+                break;
+
+            case 'completed':
+                todos = await prisma.todo.findMany({
+                    where: {
+                        ownerId: req.user.uuid,
+                        done: true,
+                    },
+                    include: {
+                        owner: true,
+                        collaborators: {
+                            include: {
+                                user: {
+                                    select: {
+                                        username: true,
+                                        firstName: true,
+                                        lastName: true,
+                                        uuid: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+                break;
+
+            default:
+                return res.status(400).json({ error: 'Invalid type parameter' });
+        }
+
         return res.status(200).json({
             success: true,
             results: todos.length,
             todos,
         });
-    }
-    catch (err: any) {
+    } catch (err: any) {
         console.error(err);
         return res.status(500).json({
             success: false,
@@ -197,11 +310,85 @@ export const getTodos = async (req: Request, res: Response) => {
 }
 
 
-export const editTodo = async (req: Request, res: Response) => {
+
+
+export const getTodoDetails = async (req: any, res: Response) => {
+    try {
+        const todoId = req.params.uuid;
+        if (!todoId) {
+            return res.status(404).json({
+                success: false,
+                message: "Please provide a todo UUID",
+            });
+        }
+
+        const todo = await prisma.todo.findUnique({
+            where: {
+                uuid: todoId,
+            },
+            include: {
+                owner: true,
+                collaborators: {
+                    include: {
+                        user: {
+                            select: {
+                                username: true,
+                                firstName: true,
+                                lastName: true,
+                                uuid: true,
+                            },
+                        },
+                    },
+                },
+                comments: {
+                    include: {
+                        author: {
+                            select: {
+                                username: true,
+                                firstName: true,
+                                lastName: true,
+                                uuid: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!todo) {
+            return res.status(404).json({
+                success: false,
+                message: "Todo not found",
+            });
+        }
+
+        const finalTodo: any = { ...todo };
+        if (todo.ownerId === req.user.uuid) {
+            finalTodo.isOwner = true;
+            finalTodo.isCollaborator = false;
+        } else {
+            finalTodo.isOwner = false;
+            finalTodo.isCollaborator = true;
+        }
+
+        res.status(200).json({
+            success: true,
+            todo: finalTodo,
+        });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+        });
+    }
+};
+
+export const editTodo = async (req: any, res: Response) => {
     try {
         const todoFound = prisma.todo.findUnique({
             where: {
-                id: parseInt(req.params.id, 10),
+                uuid: req.params.uuid,
             }
         })
         if (!todoFound) {
@@ -210,27 +397,14 @@ export const editTodo = async (req: Request, res: Response) => {
                 message: "no todos found with this id"
             })
         }
-        const validateReq = todoUpdateSchema.safeParse(req.body);
-        if (!validateReq.success) {
-            return res.status(400).json({
-                success: false,
-                message: "error validating",
-            })
-        }
-        const updatedTodo = validateReq.data;
 
+        const updatedTodo = req.body;
         const todo = await prisma.todo.update({
             data: {
                 ...updatedTodo
             },
-            select: {
-                id: true,
-                title: true,
-                description: true,
-                done: true,
-            },
             where: {
-                id: parseInt(req.params.id, 10)
+                uuid: req.params.uuid
             }
         })
         if (!todo) {
@@ -254,11 +428,11 @@ export const editTodo = async (req: Request, res: Response) => {
     }
 }
 
-export const deleteTodo = async (req: Request, res: Response) => {
+export const deleteTodo = async (req: any, res: Response) => {
     try {
         const todoFound = prisma.todo.findUnique({
             where: {
-                id: parseInt(req.params.id, 10),
+                uuid: req.params.uuidu,
             }
         })
         if (!todoFound) {
@@ -272,7 +446,7 @@ export const deleteTodo = async (req: Request, res: Response) => {
                 isDeleted: true,
             },
             where: {
-                id: parseInt(req.params.id, 10)
+                uuid: req.params.uuid
             }
         })
         if (!deletedTodo) {
@@ -295,11 +469,11 @@ export const deleteTodo = async (req: Request, res: Response) => {
 }
 
 
-export const restoreTodo = async (req: Request, res: Response) => {
+export const restoreTodo = async (req: any, res: Response) => {
     try {
         const todoFound = prisma.todo.findUnique({
             where: {
-                id: parseInt(req.params.id, 10),
+                uuid: req.params.uuid,
             }
         })
         if (!todoFound) {
@@ -313,7 +487,7 @@ export const restoreTodo = async (req: Request, res: Response) => {
                 isDeleted: false,
             },
             where: {
-                id: parseInt(req.params.id, 10)
+                uuid: req.params.uuid
             }
         })
         if (!deletedTodo) {
@@ -335,17 +509,17 @@ export const restoreTodo = async (req: Request, res: Response) => {
     }
 }
 
-export const getDeletedTodos = async (req: Request, res: Response) => {
+export const getDeletedTodos = async (req: any, res: Response) => {
     try {
         const todos = await prisma.todo.findMany({
             select: {
-                id: true,
+                uuid: true,
                 title: true,
                 description: true,
                 done: true,
             },
             where: {
-                userId: parseInt(req.user.id, 10),
+                ownerId: req.user.uuid,
                 isDeleted: true
             }
         })
@@ -364,6 +538,175 @@ export const getDeletedTodos = async (req: Request, res: Response) => {
     }
 }
 
+
+export const getCompletedTodos = async (req: any, res: Response) => {
+    try {
+        const todos = await prisma.todo.findMany({
+            select: {
+                uuid: true,
+                title: true,
+                description: true,
+                done: true,
+            },
+            where: {
+                ownerId: req.user.uuid,
+                done: true
+            }
+        })
+        return res.status(200).json({
+            success: true,
+            results: todos.length,
+            todos,
+        });
+    }
+    catch (err: any) {
+        console.error(err);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+        });
+    }
+}
+
+
+
+
+export const getSharableLink = async (req: any, res: Response) => {
+    const todoUuid = req.params.uuid;
+
+    try {
+        // Fetch the todo by its uuid
+        const todo = await prisma.todo.findUnique({
+            where: { uuid: todoUuid },
+            include: { owner: true }, // Include owner details if needed
+        });
+
+        if (!todo) {
+            return res.status(404).json({ error: 'Todo not found' });
+        }
+
+        // Here, you can construct a shareable link however you like
+        // Example: Assuming your frontend will construct the full URL
+        const shareableLink = `${req.protocol}://${req.get('host')}/todo/${todo.uuid}`;
+
+        // You can also return additional details if needed
+        res.json({ shareableLink, todo });
+    } catch (error) {
+        console.error('Error fetching todo:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+
+export const addCollaborator = async (req: any, res: Response) => {
+    const todoUuid = req.params.uuid;
+    const userUuid = req.user.uuid; // Assuming userId of the new collaborator
+
+    try {
+        // Fetch the todo by its uuid
+        const todo = await prisma.todo.findUnique({
+            where: { uuid: todoUuid },
+        });
+
+        if (!todo) {
+            return res.status(404).json({ error: 'Todo not found' });
+        }
+
+        if (todo.ownerId === userUuid) {
+            return res.status(403).json({ error: 'You are the owner of this todo' });
+        }
+        // Check if the user is already a collaborator
+        const existingCollaborator = await prisma.todoCollaborator.findFirst({
+            where: {
+                todoId: todo.uuid,
+                userId: userUuid,
+            },
+        });
+
+        if (existingCollaborator) {
+            return res.status(400).json({ error: 'User is already a collaborator' });
+        }
+        const ownerDetails = await prisma.user.findUnique({
+            where: { uuid: todo.ownerId },
+        })
+        // Add the user as a collaborator to the todo
+        const newCollaborator = await prisma.todoCollaborator.create({
+            data: {
+                userId: userUuid,
+                todoId: todo.uuid,
+            },
+        });
+        if (!newCollaborator) {
+            console.error('Error adding collaborator:');
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+        const da = await prisma.todo.update({
+            where: { uuid: todoUuid },
+            data: {
+                shared: true,
+            }
+        })
+
+        res.json({ success: true, message: 'User added as collaborator', collaborator: newCollaborator, todo, owner: ownerDetails });
+    } catch (error) {
+        console.error('Error adding collaborator:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+
+
+
+export const createComment = async (req: any, res: Response) => {
+    const todoUuid = req.params.uuid;
+    const userUuid = req.user.uuid;
+    const { content } = req.body;
+
+    try {
+        // Fetch the todo by its uuid
+        const todo = await prisma.todo.findUnique({
+            where: { uuid: todoUuid },
+        });
+
+        if (!todo) {
+            return res.status(404).json({ error: 'Todo not found' });
+        }
+
+        if (todo.ownerId !== userUuid) {
+            const existingCollaborator = await prisma.todoCollaborator.findFirst({
+                where: {
+                    todoId: todo.uuid,
+                    userId: userUuid,
+                },
+            });
+            if (!existingCollaborator) {
+                return res.status(403).json({ error: 'unauthorised' });
+            }
+            // return res.status(403).json({ error: 'You are the owner of this todo' });
+        }
+        const commentData = await prisma.comment.create({
+            data: {
+                content,
+                authorId: userUuid,
+                todoId: todoUuid,
+            }
+        });
+        if (!commentData) {
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+        return res.status(200).json({
+            success: true,
+            message: 'Comment added successfully',
+            comment: commentData,
+        })
+
+    } catch (error) {
+        console.error('Error adding comment:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+
+
+}
 
 
 
